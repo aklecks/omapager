@@ -32,6 +32,7 @@
       "stacking": "source",
       "actionsAlign": "right",
       "hideSettingsAction": true,
+      "playSounds": true,
       "snoozeDurations": [
         "30",
         "60",
@@ -105,6 +106,13 @@
         "label": "Hide the browser's Settings button",
         "defaultValue": true,
         "description": "Hide the repeated Settings action on browser notifications."
+      },
+      {
+        "key": "playSounds",
+        "type": "boolean",
+        "label": "Play a sound on arrival",
+        "description": "The desktop's own notification sound, from the sound theme. Silenced and snoozed notifications stay silent; critical ones sound even during Do Not Disturb.",
+        "defaultValue": true
       },
       {
         "key": "snoozeDurations",

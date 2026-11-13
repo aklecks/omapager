@@ -103,6 +103,12 @@ Item {
   // is dropped by default and can be put back.
   property bool hideSettingsAction: true
 
+  // An arrival makes a sound, and the desktop owns it: one themed event from
+  // the XDG sound theme rather than a jingle per app. It sits on the same
+  // delivery decision as the card, so a silenced or snoozed notification is
+  // silent all the way down, and a critical one sounds because it is shown.
+  property bool playSounds: true
+
   property string displayMode: "active"
   property string displayName: ""
   property string deckDisplayName: ""
@@ -1156,9 +1162,30 @@ Item {
   }
 
   // ------------------------------------------------------------- arrival
+  // The desktop's own arrival sound, played through the XDG sound theme.
+  // canberra resolves the theme and the file; an event name nothing in the
+  // theme answers simply plays nothing, which is the right reply to a name we
+  // do not know. A sender may ask for a themed event through the spec's
+  // sound-name hint - a bounded name, never a path: a sound file is the
+  // sender's choice of bytes on disk, and a theme name is all the spec's
+  // default path needs.
+  property double lastSoundAt: 0
+
+  function playArrivalSound(soundName) {
+    if (!playSounds) return
+    // A burst of arrivals is one event to the ear, not one per card.
+    var now = Date.now()
+    if (now - lastSoundAt < 200) return
+    lastSoundAt = now
+    var name = /^[a-zA-Z0-9._-]{1,64}$/.test(String(soundName || ""))
+               ? String(soundName) : "message-new-instant"
+    Quickshell.execDetached(["canberra-gtk-play", "-i", name])
+  }
+
   function handleNotification(notification) {
     // Replacements reuse the same slot, including before its first insertion.
-    var key = keyForOriginal(notification.id) || nextKey()
+    var existing = keyForOriginal(notification.id)
+    var key = existing || nextKey()
 
     // Without this the object is destroyed as soon as this handler returns,
     // taking the actions and the image with it.
@@ -1203,6 +1230,12 @@ Item {
     wantSenderImage(row)
     wantIcon(row)
     lookForReply(row)
+
+    // A replacement changes a card that already made its sound; only a new
+    // arrival sounds, and it sounds when it arrives - a card waiting for a
+    // held deck has still arrived.
+    if (!existing)
+      playArrivalSound(String((notification.hints || {})["sound-name"] || ""))
 
     // An update to something already on screen goes through either way: it
     // changes a card in place rather than moving anything. Only a genuinely

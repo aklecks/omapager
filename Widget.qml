@@ -201,6 +201,7 @@ BarWidget {
     var hours = Number(setting("historyHours", 24))
     service.setHistoryHours([0, 1, 24, 168].indexOf(hours) >= 0 ? hours : 24)
     service.hideSettingsAction = setting("hideSettingsAction", true) !== false
+    service.playSounds = setting("playSounds", true) !== false
     // Only when it has actually been configured. An explicit setting is an
     // instruction; the default is not one - and the panel's own key toggle is
     // persisted, so applying the default on every reload would quietly undo it.

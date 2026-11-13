@@ -52,6 +52,10 @@ Web notifications open their source URL when no matching window is available.
 **Snooze and Do Not Disturb.** Right-click a notification to snooze its source.
 Use the panel to snooze everything or toggle Do Not Disturb.
 
+**One desktop sound.** An arrival plays the sound theme's notification event -
+one sound for the desktop, not a jingle per app. Silenced and snoozed
+notifications are silent; critical ones sound even during Do Not Disturb.
+
 **Verification-code exception.** Let login codes through while notifications
 are snoozed or silenced. Turn this off with the key button in the panel.
 
