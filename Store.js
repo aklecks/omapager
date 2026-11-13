@@ -256,3 +256,63 @@ function sanitiseForPersistence(row) {
   out.execArgv = ""
   return out
 }
+
+// ------------------------------------------------------------- the mirror
+//
+// The notification center (jankeesvw.notification-center) archives the
+// built-in service's history.json. Omapager replaced that service, so nothing
+// wrote the file any more and the archive starved. Closed rows are mirrored
+// there in the shape the built-in service writes: one JSON array, newest
+// first, kept to the same 100 entries and 24 hours, so a re-enabled built-in
+// service finds a file it can simply take over. Rows only ever leave by the
+// mirror's own trim; the archive keys on .key and keeps what it has read.
+// Written from the shell process, the way the built-in service writes it -
+// the helper sandbox stays scoped to Omapager's own state.
+var MIRROR_LIMIT = 100
+var MIRROR_HOURS = 24
+var MIRROR_BYTES = 49152
+var MIRROR_BODY_CHARS = 2048
+
+// A closed row for the mirror: what the archive reads, stamped with when and
+// why it closed, the way the built-in service's closedEntry does it.
+function mirrorEntry(row, reason, now) {
+  var clean = sanitiseForPersistence(row)
+  var fields = ["key", "app", "appIcon", "summary", "body", "bodyLine", "source", "urgency", "ts"]
+  var out = {}
+  for (var i = 0; i < fields.length; i++) out[fields[i]] = clean[fields[i]]
+  for (var field in out)
+    if (typeof out[field] === "string" && out[field].length > MIRROR_BODY_CHARS)
+      out[field] = out[field].slice(0, MIRROR_BODY_CHARS)
+  out.closed_ts = now
+  out.closed_reason = /^[a-z]{1,32}$/.test(String(reason)) ? String(reason) : ""
+  return out
+}
+
+function parseMirror(text) {
+  try {
+    var value = JSON.parse(String(text || "[]"))
+    if (!Array.isArray(value)) return []
+    var out = []
+    for (var i = 0; i < value.length && out.length < MIRROR_LIMIT; i++)
+      if (value[i] && typeof value[i] === "object" && typeof value[i].key === "string")
+        out.push(value[i])
+    return out
+  } catch (e) {
+    return []
+  }
+}
+
+// Newest first. A row already there is replaced by the newer entry, and rows
+// past their age go: whichever of the count and the retention bites first.
+function addMirror(entries, entry, now) {
+  var out = [entry]
+  for (var i = 0; i < entries.length && out.length < MIRROR_LIMIT; i++) {
+    var row = entries[i]
+    if (!row || row.key === entry.key) continue
+    if (typeof row.closed_ts === "number" && row.closed_ts < now - MIRROR_HOURS * 3600) continue
+    out.push(row)
+  }
+  return out
+}
+
+function serialiseMirror(entries) { return JSON.stringify(entries) + "\n" }

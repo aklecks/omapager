@@ -1220,6 +1220,8 @@ Item {
     if (muted && notification.urgency !== NotificationUrgency.Critical) {
       Store.write(storeProc, storeBin, "put", row)
       Store.write(storeProc, storeBin, "close", null, [key, muted])
+      // Quiet still tells the archive what it held back.
+      mirrorClose(row, muted)
       release(key)
       if (rowIndexFor(key) < 0) releaseLive(key)
       else liveKeys[key].row = null
@@ -1386,6 +1388,10 @@ Item {
     leaving = rest
     var at = rowIndexFor(key)
     if (!liveKeys[key]) return
+    // The mirror wants what the card said, and this is the last place it is
+    // reachable: a card on screen comes from the model, one held back from
+    // its reservation.
+    mirrorClose(at >= 0 ? toasts.get(at) : liveKeys[key].row, reason)
     releaseLive(key)
     release(key, reason)
     if (at >= 0) toasts.remove(at)
@@ -1934,6 +1940,88 @@ Item {
     environment: service.helperEnvironment
     property bool policyReady: service.helperSettingsReady
   }
+
+  // ----------------------------------------------------------- the mirror
+  //
+  // Closed rows also land in the built-in service's history file, where the
+  // notification center archives them. Written from here rather than from the
+  // store helper, the way the built-in service writes the file itself: the
+  // helper sandbox stays scoped to Omapager's own state.
+  readonly property string mirrorDir: Quickshell.env("HOME") + "/.local/state/omarchy/notifications"
+  property bool mirrorReady: false
+  property bool mirrorLoaded: false
+  property bool mirrorUnsaved: false
+  property var mirrorEntries: []
+
+  function mirrorClose(row, reason) {
+    if (!mirrorReady || !row || !String(row.key || "")) return
+    var now = Date.now() / 1000
+    mirrorEntries = Store.addMirror(mirrorEntries, Store.mirrorEntry(row, reason, now), now)
+    mirrorSaveSoon()
+  }
+
+  function mirrorSaveSoon() {
+    mirrorUnsaved = true
+    if (!mirrorSaveTimer.running) mirrorSaveTimer.start()
+  }
+
+  // A file is written only once it has been read, so startup never overwrites
+  // what the last session left; the loader saves again when it differs.
+  function loadMirror(text) {
+    if (mirrorLoaded) return
+    var stored = Store.parseMirror(text)
+    mirrorLoaded = true
+    // Closes that ran before the file was read keep their place at the top.
+    for (var i = mirrorEntries.length - 1; i >= 0; i--)
+      stored = Store.addMirror(stored, mirrorEntries[i], Date.now() / 1000)
+    mirrorEntries = stored
+    if (mirrorUnsaved || Store.serialiseMirror(mirrorEntries) !== String(text)) mirrorSaveSoon()
+  }
+
+  function flushMirror() {
+    if (!mirrorUnsaved || !mirrorLoaded) return
+    mirrorUnsaved = false
+    // One budget for the whole file: the newest stay, the oldest go.
+    var entries = mirrorEntries
+    while (entries.length > 0 && JSON.stringify(entries).length > Store.MIRROR_BYTES)
+      entries = entries.slice(0, -1)
+    mirrorEntries = entries
+    mirrorFile.setText(Store.serialiseMirror(entries))
+  }
+
+  Timer {
+    id: mirrorSaveTimer
+    interval: 250
+    onTriggered: service.flushMirror()
+  }
+
+  // The private directory and its file exist before anything writes them, at
+  // 0600; an atomic write keeps the mode of the file it replaces.
+  Process {
+    id: mirrorPrepare
+    command: ["bash", "-c",
+      "umask 077\n" +
+      "dir=$1\n" +
+      "file=$dir/history.json\n" +
+      "mkdir -p -- \"$dir\" && chmod 700 -- \"$dir\" || exit 1\n" +
+      "if [[ -L $file ]]; then rm -f -- \"$file\"; fi\n" +
+      "if [[ -f $file ]]; then chmod 600 -- \"$file\"; elif [[ ! -e $file ]]; then : >\"$file\"; fi\n",
+      "omarchy-omapager-mirror", service.mirrorDir]
+    onExited: function(code) { service.mirrorReady = code === 0 }
+  }
+
+  FileView {
+    id: mirrorFile
+    path: service.mirrorReady ? service.mirrorDir + "/history.json" : ""
+    atomicWrites: true
+    printErrors: false
+    onLoaded: service.loadMirror(text())
+    onLoadFailed: service.loadMirror("")
+  }
+
+  Component.onCompleted: mirrorPrepare.running = true
+  // A reload or a clean exit inside the save delay still writes.
+  Component.onDestruction: flushMirror()
 
   function restoreRows(rows, replay) {
     // Restore is oldest first; history is newest first. Both insert at zero.

@@ -97,7 +97,9 @@ const capacitySource = [
   extract(source, 'function liveCount()', '// ------------------------------------------------------------- icons'),
   extract(source, 'function wantSenderImage(row)', '\n  Process {'),
   extract(source, 'function nextKey()', '// ------------------------------------------------------------- arrival'),
+  extract(source, 'function playArrivalSound(soundName)', '\n  function handleNotification(notification)'),
   extract(source, 'function handleNotification(notification)', '// Qt.callLater: mutating the model'),
+  extract(source, 'function mirrorClose(row, reason)', '\n  function mirrorSaveSoon()'),
   extract(source, 'function showRow(row)', "// Let go of the sender's object"),
   extract(source, 'function release(key, reason)', '// ------------------------------------------------------------- departure'),
   extract(source, 'function closeToast(key, reason)', '// What the sender said can be done'),
@@ -114,6 +116,7 @@ function newCapacityScope() {
     setProperty(i, role, value) { this.rows[i][role] = value; },
     remove(i) { this.rows.splice(i, 1); } };
   const later = [];
+  const sounds = [];
   const s = {
     toasts, refs: {}, refsRevision: 0, keySeed: 0, liveKeys: Object.create(null),
     maxLiveNotifications: 100, heights: {}, leaving: {}, layoutRevision: 0,
@@ -123,7 +126,12 @@ function newCapacityScope() {
     configuredDisplayName: 'fixture-display', deckDisplayName: '',
     fullscreenAway: false, fullscreenScope: '', hyprRevision: 0,
     displayNames: ['fixture-display'], focusedDisplayName: 'fixture-display',
-    Quickshell: { screens: [] }, Hyprland: { monitorFor: screen => screen.monitor },
+    Quickshell: { screens: [], execDetached: argv => sounds.push(argv) },
+    Hyprland: { monitorFor: screen => screen.monitor },
+    sounds,
+    playSounds: true, lastSoundAt: 0,
+    mirrorReady: true, mirrorLoaded: true, mirrorUnsaved: false, mirrorEntries: [],
+    mirrorDir: '', mirrorSaveSoon: () => {},
     snoozeRevision: 0, snoozes: {},
     codesBypassQuiet: false, hideSettingsAction: false,
     lowDuration: 5000, normalDuration: 8000, maxDuration: 30000,
@@ -202,6 +210,39 @@ function newCapacityScope() {
   assert.equal(s.routeAround('game'), 'work');
   s.fullscreenAway = false;
   assert.equal(s.routeAround('game'), 'game');
+}
+
+{ // The arrival sound follows the delivery decision: shown cards sound, held
+  // back ones do not, replacements do not re-sound, and bursts coalesce.
+  const s = newCapacityScope();
+  const first = s.fakeNotification(1, 'first');
+  s.handleNotification(first);
+  s.drainCallLater();
+  assert.equal(s.sounds.length, 1, 'a new arrival sounds');
+  assert.deepEqual([...s.sounds[0]], ['canberra-gtk-play', '-i', 'message-new-instant']);
+  first.summary = 'first, edited';
+  s.handleNotification(first);
+  s.drainCallLater();
+  assert.equal(s.sounds.length, 1, 'a replacement does not re-sound');
+  s.doNotDisturb = true;
+  s.handleNotification(s.fakeNotification(2, 'quiet one'));
+  s.drainCallLater();
+  assert.equal(s.sounds.length, 1, 'a silenced arrival is silent');
+  assert.equal(s.mirrorEntries.length, 1, 'quiet still reaches the archive');
+  assert.equal(s.mirrorEntries[0].closed_reason, 'silenced');
+  assert.equal(s.mirrorEntries[0].summary, 'quiet one');
+  s.lastSoundAt = 0;   // not inside the first arrival's beat any more
+  s.handleNotification(s.fakeNotification(3, 'critical', 2));
+  s.drainCallLater();
+  assert.equal(s.sounds.length, 2, 'critical sounds during Do Not Disturb');
+  s.handleNotification(s.fakeNotification(4, 'burst'));
+  s.drainCallLater();
+  assert.equal(s.sounds.length, 2, 'arrivals inside the beat coalesce');
+  s.playSounds = false;
+  s.lastSoundAt = 0;
+  s.handleNotification(s.fakeNotification(5, 'sound off'));
+  s.drainCallLater();
+  assert.equal(s.sounds.length, 2, 'playSounds off means silent');
 }
 
 { // Rapid single dismissals must skip rows still playing their exit animation.
